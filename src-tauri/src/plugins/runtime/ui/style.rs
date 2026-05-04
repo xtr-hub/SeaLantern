@@ -1,6 +1,8 @@
 use super::super::PluginRuntime;
-use super::common::{emit_result, lua_str, map_create_err, map_set_err};
-use crate::plugins::api::{emit_permission_log, emit_ui_event};
+use super::common::{
+    emit_ui_action, json_to_string, lua_str, map_create_err, map_set_err,
+    register_single_string_ui_action, UiLogSpec, VALID_INSERT_PLACEMENTS,
+};
 use mlua::Table;
 
 pub(super) fn register(runtime: &PluginRuntime, ui_table: &Table) -> Result<(), String> {
@@ -12,92 +14,68 @@ pub(super) fn register(runtime: &PluginRuntime, ui_table: &Table) -> Result<(), 
             .create_function(move |lua, (style_id, css): (mlua::String, mlua::String)| {
                 let style_id = lua_str(style_id);
                 let css = lua_str(css);
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.inject_css", &style_id);
-                emit_result(
+                emit_ui_action(
                     lua,
                     &pid,
                     "inject_css",
-                    emit_ui_event(&pid, "inject_css", &style_id, &css),
+                    "inject_css",
+                    &style_id,
+                    &css,
+                    Some(UiLogSpec {
+                        api_name: "sl.ui.inject_css",
+                        target: &style_id,
+                    }),
                 )
             }),
         "ui.inject_css",
     )?;
     map_set_err(ui_table.set("inject_css", inject_css_fn), "ui.inject_css")?;
 
-    // sl.ui.remove_css(style_id)
-    let pid = runtime.plugin_id.clone();
-    let remove_css_fn = map_create_err(
-        runtime
-            .lua
-            .create_function(move |lua, style_id: mlua::String| {
-                let style_id = lua_str(style_id);
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.remove_css", &style_id);
-                emit_result(
-                    lua,
-                    &pid,
-                    "remove_css",
-                    emit_ui_event(&pid, "remove_css", &style_id, ""),
-                )
-            }),
-        "ui.remove_css",
+    register_single_string_ui_action(
+        &runtime.lua,
+        ui_table,
+        &runtime.plugin_id,
+        "remove_css",
+        "remove_css",
+        "remove_css",
+        "sl.ui.remove_css",
     )?;
-    map_set_err(ui_table.set("remove_css", remove_css_fn), "ui.remove_css")?;
-
-    // sl.ui.hide(selector)
-    let pid = runtime.plugin_id.clone();
-    let hide_fn = map_create_err(
-        runtime
-            .lua
-            .create_function(move |lua, selector: mlua::String| {
-                let selector = lua_str(selector);
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.hide", &selector);
-                emit_result(lua, &pid, "hide", emit_ui_event(&pid, "hide", &selector, ""))
-            }),
-        "ui.hide",
+    register_single_string_ui_action(
+        &runtime.lua,
+        ui_table,
+        &runtime.plugin_id,
+        "hide",
+        "hide",
+        "hide",
+        "sl.ui.hide",
     )?;
-    map_set_err(ui_table.set("hide", hide_fn), "ui.hide")?;
-
-    // sl.ui.show(selector)
-    let pid = runtime.plugin_id.clone();
-    let show_fn = map_create_err(
-        runtime
-            .lua
-            .create_function(move |lua, selector: mlua::String| {
-                let selector = lua_str(selector);
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.show", &selector);
-                emit_result(lua, &pid, "show", emit_ui_event(&pid, "show", &selector, ""))
-            }),
-        "ui.show",
+    register_single_string_ui_action(
+        &runtime.lua,
+        ui_table,
+        &runtime.plugin_id,
+        "show",
+        "show",
+        "show",
+        "sl.ui.show",
     )?;
-    map_set_err(ui_table.set("show", show_fn), "ui.show")?;
-
-    // sl.ui.disable(selector)
-    let pid = runtime.plugin_id.clone();
-    let disable_fn = map_create_err(
-        runtime
-            .lua
-            .create_function(move |lua, selector: mlua::String| {
-                let selector = lua_str(selector);
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.disable", &selector);
-                emit_result(lua, &pid, "disable", emit_ui_event(&pid, "disable", &selector, ""))
-            }),
-        "ui.disable",
+    register_single_string_ui_action(
+        &runtime.lua,
+        ui_table,
+        &runtime.plugin_id,
+        "disable",
+        "disable",
+        "disable",
+        "sl.ui.disable",
     )?;
-    map_set_err(ui_table.set("disable", disable_fn), "ui.disable")?;
-
-    // sl.ui.enable(selector)
-    let pid = runtime.plugin_id.clone();
-    let enable_fn = map_create_err(
-        runtime
-            .lua
-            .create_function(move |lua, selector: mlua::String| {
-                let selector = lua_str(selector);
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.enable", &selector);
-                emit_result(lua, &pid, "enable", emit_ui_event(&pid, "enable", &selector, ""))
-            }),
-        "ui.enable",
+    register_single_string_ui_action(
+        &runtime.lua,
+        ui_table,
+        &runtime.plugin_id,
+        "enable",
+        "enable",
+        "enable",
+        "sl.ui.enable",
     )?;
-    map_set_err(ui_table.set("enable", enable_fn), "ui.enable")?;
 
     // sl.ui.insert(placement, selector, html)
     let pid = runtime.plugin_id.clone();
@@ -108,17 +86,27 @@ pub(super) fn register(runtime: &PluginRuntime, ui_table: &Table) -> Result<(), 
                 let selector = lua_str(selector);
                 let html = lua_str(html);
 
-                if !["before", "after", "prepend", "append"].contains(&placement.as_str()) {
+                if !VALID_INSERT_PLACEMENTS.contains(&placement.as_str()) {
                     return Err(mlua::Error::runtime(format!(
-                        "无效的 placement 参数: '{}', 必须是 'before', 'after', 'prepend' 或 'append'",
-                        placement
+                        "无效的 placement 参数: '{}', 必须是 {:?}",
+                        placement, VALID_INSERT_PLACEMENTS
                     )));
                 }
 
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.insert", &format!("{} {}", placement, selector));
-
+                let log_target = format!("{} {}", placement, selector);
                 let combined = format!("{}|{}", placement, selector);
-                emit_result(lua, &pid, "insert", emit_ui_event(&pid, "insert", &combined, &html))
+                emit_ui_action(
+                    lua,
+                    &pid,
+                    "insert",
+                    "insert",
+                    &combined,
+                    &html,
+                    Some(UiLogSpec {
+                        api_name: "sl.ui.insert",
+                        target: &log_target,
+                    }),
+                )
             },
         ),
         "ui.insert",
@@ -132,13 +120,17 @@ pub(super) fn register(runtime: &PluginRuntime, ui_table: &Table) -> Result<(), 
             .lua
             .create_function(move |lua, selector: mlua::String| {
                 let selector = lua_str(selector);
-
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.remove", &selector);
-                emit_result(
+                emit_ui_action(
                     lua,
                     &pid,
                     "remove",
-                    emit_ui_event(&pid, "remove_selector", &selector, ""),
+                    "remove_selector",
+                    &selector,
+                    "",
+                    Some(UiLogSpec {
+                        api_name: "sl.ui.remove",
+                        target: &selector,
+                    }),
                 )
             }),
         "ui.remove",
@@ -155,19 +147,22 @@ pub(super) fn register(runtime: &PluginRuntime, ui_table: &Table) -> Result<(), 
 
                 let mut style_map = serde_json::Map::new();
                 for (key, value) in styles.pairs::<mlua::String, mlua::String>().flatten() {
-                    let key = lua_str(key);
-                    let value = lua_str(value);
-                    style_map.insert(key, serde_json::Value::String(value));
+                    style_map.insert(lua_str(key), serde_json::Value::String(lua_str(value)));
                 }
-                let styles_json = serde_json::to_string(&style_map).unwrap_or_default();
+                let styles_json =
+                    json_to_string(&serde_json::Value::Object(style_map), "set_style")?;
 
-                let _ = emit_permission_log(&pid, "api_call", "sl.ui.set_style", &selector);
-
-                emit_result(
+                emit_ui_action(
                     lua,
                     &pid,
                     "set_style",
-                    emit_ui_event(&pid, "set_style", &selector, &styles_json),
+                    "set_style",
+                    &selector,
+                    &styles_json,
+                    Some(UiLogSpec {
+                        api_name: "sl.ui.set_style",
+                        target: &selector,
+                    }),
                 )
             }),
         "ui.set_style",
@@ -182,24 +177,24 @@ pub(super) fn register(runtime: &PluginRuntime, ui_table: &Table) -> Result<(), 
                 let selector = lua_str(selector);
                 let attr = lua_str(attr);
                 let value = lua_str(value);
-
-                let _ = emit_permission_log(
-                    &pid,
-                    "api_call",
-                    "sl.ui.set_attribute",
-                    &format!("{} {}={}", selector, attr, value),
-                );
+                let log_target = format!("{} {}={}", selector, attr, value);
                 let attr_json = serde_json::json!({
                     "attribute": attr,
                     "value": value
                 })
                 .to_string();
 
-                emit_result(
+                emit_ui_action(
                     lua,
                     &pid,
                     "set_attribute",
-                    emit_ui_event(&pid, "set_attribute", &selector, &attr_json),
+                    "set_attribute",
+                    &selector,
+                    &attr_json,
+                    Some(UiLogSpec {
+                        api_name: "sl.ui.set_attribute",
+                        target: &log_target,
+                    }),
                 )
             },
         ),

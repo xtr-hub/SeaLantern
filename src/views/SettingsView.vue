@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from "vue";
 import SLSpinner from "@components/common/SLSpinner.vue";
 import GeneralSettingsCard from "@components/views/settings/GeneralSettingsCard.vue";
 import ServerDefaultsCard from "@components/views/settings/ServerDefaultsCard.vue";
+import NetworkSettingsCard from "@components/views/settings/NetworkSettingsCard.vue";
 import DeveloperModeCard from "@components/views/settings/DeveloperModeCard.vue";
 import SettingsActions from "@components/views/settings/SettingsActions.vue";
 import ImportSettingsModal from "@components/views/settings/ImportSettingsModal.vue";
@@ -10,11 +11,12 @@ import ResetConfirmModal from "@components/views/settings/ResetConfirmModal.vue"
 import { settingsApi, type AppSettings, type SettingsGroup } from "@api/settings";
 import { systemApi } from "@api/system";
 import { i18n } from "@language";
-import { useMessage } from "@composables/useMessage";
+import { useMessage, useGlobalMessage } from "@composables/useMessage";
 import { useLoading } from "@composables/useAsync";
 import { dispatchSettingsUpdate, SETTINGS_UPDATE_EVENT } from "@stores/settingsStore";
 
 const { error, showError, clearError } = useMessage();
+const { success: globalSuccess } = useGlobalMessage();
 const { loading, start: startLoading, stop: stopLoading } = useLoading();
 
 const settings = ref<AppSettings | null>(null);
@@ -185,6 +187,7 @@ async function exportSettings() {
   try {
     const json = await settingsApi.exportJson();
     await navigator.clipboard.writeText(json);
+    globalSuccess(i18n.t("settings.export_success"));
   } catch (e) {
     showError(String(e));
   }
@@ -267,6 +270,8 @@ async function handleBrowseRunPath() {
         @browseJavaPath="handleBrowseJavaPath"
         @browseRunPath="handleBrowseRunPath"
       />
+
+      <NetworkSettingsCard />
 
       <DeveloperModeCard v-model:developerMode="settings.developer_mode" @change="markChanged" />
 

@@ -5,7 +5,7 @@ import { useUiStore } from "@stores/uiStore";
 import { useServerStore } from "@stores/serverStore";
 import { usePluginStore } from "@stores/pluginStore";
 import { i18n } from "@language";
-import SLServerSelector from "@components/common/SLServerSelector.vue";
+import SLSelect from "@components/common/SLSelect.vue";
 import {
   Home,
   Plus,
@@ -22,6 +22,7 @@ import {
   LayoutDashboard,
   BarChart2,
   Sparkles,
+  Link2,
   DownloadIcon,
   type LucideIcon,
 } from "lucide-vue-next";
@@ -43,6 +44,7 @@ const iconMap: Record<string, LucideIcon> = {
   "layout-dashboard": LayoutDashboard,
   chart: BarChart2,
   sparkles: Sparkles,
+  link2: Link2,
   download: DownloadIcon,
 };
 
@@ -99,6 +101,14 @@ const staticNavItems: NavItem[] = [
     icon: "download",
     labelKey: "common.download",
     label: i18n.t("common.download"),
+    group: "main",
+  },
+  {
+    name: "tunnel",
+    path: "/tunnel",
+    icon: "link2",
+    labelKey: "common.tunnel",
+    label: i18n.t("common.tunnel"),
     group: "main",
   },
   {
@@ -446,11 +456,15 @@ function getAppName() {
     </div>
     <nav class="sidebar-nav">
       <div class="nav-active-indicator" ref="navIndicator"></div>
-      <SLServerSelector
+      <SLSelect
         v-if="serverOptions.length > 0"
         v-model="currentServerRef"
         :options="serverOptions"
         :collapsed="ui.sidebarCollapsed"
+        :icon="Server"
+        :placeholder="i18n.t('common.select_server')"
+        variant="server"
+        dropdown-align="right"
         class="server-selector"
       />
 

@@ -1,4 +1,4 @@
-import { tauriInvoke } from "@api/tauri";
+import { tauriInvoke, isBrowserEnv, HTTP_API_BASE } from "@api/tauri";
 import type { ServerInstance } from "@type/server";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -18,6 +18,11 @@ export interface ParsedServerCoreInfo {
 export interface ServerLogLineEvent {
   server_id: string;
   line: string;
+}
+
+export interface ForceStopPreparation {
+  token: string;
+  expiresAt: number;
 }
 
 export interface StartupCandidateItem {
@@ -223,6 +228,14 @@ export const serverApi = {
     return tauriInvoke("stop_server", { id });
   },
 
+  async prepareForceStop(id: string): Promise<ForceStopPreparation> {
+    return tauriInvoke("prepare_force_stop_server", { id });
+  },
+
+  async forceStop(id: string, confirmationToken: string): Promise<void> {
+    return tauriInvoke("force_stop_server", { id, confirmationToken });
+  },
+
   async sendCommand(id: string, command: string): Promise<void> {
     return tauriInvoke("send_command", { id, command });
   },
@@ -244,12 +257,85 @@ export const serverApi = {
   },
 
   onLogLine(callback: (payload: ServerLogLineEvent) => void): Promise<UnlistenFn> {
+    // 浏览器环境使用 SSE
+    if (isBrowserEnv()) {
+      return this.subscribeLogStream(callback);
+    }
+    // Tauri 环境使用事件监听
     return listen<ServerLogLineEvent>("server-log-line", (event) => {
       callback(event.payload);
     });
   },
 
+  /**
+   * SSE 日志流订阅（浏览器/Docker 模式）
+   * 返回取消订阅函数
+   */
+  subscribeLogStream(callback: (payload: ServerLogLineEvent) => void): Promise<UnlistenFn> {
+    return new Promise((resolve) => {
+      const url = `${HTTP_API_BASE}/api/logs/stream`;
+      const eventSource = new EventSource(url);
+
+      eventSource.addEventListener("message", (event) => {
+        try {
+          const data = JSON.parse(event.data) as ServerLogLineEvent;
+          callback(data);
+        } catch (e) {
+          console.warn("[SSE] Failed to parse log event:", e);
+        }
+      });
+
+      eventSource.addEventListener("error", (e) => {
+        console.warn("[SSE] Connection error, reconnecting...", e);
+        // 自动重连：关闭旧连接，延迟后创建新连接
+        eventSource.close();
+        setTimeout(() => {
+          this.subscribeLogStream(callback);
+        }, 3000);
+      });
+
+      // 返回取消订阅函数
+      resolve(() => {
+        eventSource.close();
+      });
+    });
+  },
+
   async updateServerName(id: string, name: string): Promise<void> {
     return tauriInvoke("update_server_name", { id, name });
+  },
+
+  async validateServerPath(newPath: string): Promise<{
+    valid: boolean;
+    message: string;
+    jarPath: string | null;
+    startupMode: string | null;
+  }> {
+    const result = await tauriInvoke<{
+      valid: boolean;
+      message: string;
+      jar_path: string | null;
+      startup_mode: string | null;
+    }>("validate_server_path", { newPath });
+    return {
+      valid: result.valid,
+      message: result.message,
+      jarPath: result.jar_path,
+      startupMode: result.startup_mode,
+    };
+  },
+
+  async updateServerPath(
+    id: string,
+    newPath: string,
+    newJarPath?: string,
+    newStartupMode?: string,
+  ): Promise<ServerInstance> {
+    return tauriInvoke("update_server_path", {
+      id,
+      newPath,
+      newJarPath,
+      newStartupMode,
+    });
   },
 };

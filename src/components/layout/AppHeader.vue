@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from "vue";
+import { useRoute } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Minus, Square, X, ChevronDown, ChevronUp, Copy } from "lucide-vue-next";
+import { Minus, Square, X, ChevronDown, ChevronUp, Copy, Check, Globe } from "lucide-vue-next";
 import { useI18nStore } from "@stores/i18nStore";
 import { i18n } from "@language";
 import SLModal from "@components/common/SLModal.vue";
@@ -17,6 +18,7 @@ import {
   type SettingsUpdateEvent,
 } from "@stores/settingsStore";
 
+const route = useRoute();
 const appWindow = getCurrentWindow();
 const i18nStore = useI18nStore();
 const showCloseModal = ref(false);
@@ -25,6 +27,14 @@ const closeAction = ref<string>("ask"); // ask, minimize, close
 const rememberChoice = ref(false);
 const isMaximized = ref(false);
 const isMacOS = isMacOSPlatform();
+
+const pageTitle = computed(() => {
+  const titleKey = route.meta?.titleKey as string;
+  if (titleKey) {
+    return i18n.t(titleKey);
+  }
+  return i18n.t("common.app_name");
+});
 
 const primaryLanguages = computed(() => {
   const primaryCodes = ["zh-CN", "zh-TW", "en-US", "ja-JP"];
@@ -257,6 +267,10 @@ async function handleLanguageClick(locale: string, close?: () => void) {
     isChangingLanguage.value = false;
   }
 }
+
+function isActive(code: string) {
+  return i18nStore.currentLocale == code;
+}
 </script>
 
 <template>
@@ -265,43 +279,70 @@ async function handleLanguageClick(locale: string, close?: () => void) {
     :class="{ 'macos-overlay': isMacOS, 'glass-strong': !isMacOS }"
     data-tauri-drag-region
   >
-    <div class="header-center" data-tauri-drag-region></div>
+    <div class="header-left" v-if="!isMacOS">
+      <h2 class="page-title" data-tauri-drag-region>{{ pageTitle }}</h2>
+    </div>
+
+    <div class="header-center">
+      <h2 class="page-title" v-if="isMacOS" data-tauri-drag-region>{{ pageTitle }}</h2>
+    </div>
 
     <div class="header-right">
       <Menu as="div" class="language-selector">
         <MenuButton class="language-button">
-          <span class="language-text">{{ currentLanguageText }}</span>
+          <Globe class="language-text" :size="16" />
         </MenuButton>
         <MenuItems class="language-menu">
           <!-- 主要语言 -->
           <MenuItem v-for="option in primaryLanguages" :key="option.code" v-slot="{ close }">
-            <div class="language-item" @click="() => handleLanguageClick(option.code, close)">
+            <div
+              class="language-item"
+              :class="{ active: isActive(option.code) }"
+              @click="() => handleLanguageClick(option.code, close)"
+            >
               <div class="language-item-main">
                 <span class="language-label">{{ option.label }}</span>
               </div>
+              <Check v-if="isActive(option.code)" :size="16" aria-hidden="true" />
             </div>
           </MenuItem>
 
-          <!-- 更多语言选项 -->
+          <!-- 其他语言（仅在展开时显示） -->
+          <Transition name="language-toggle">
+            <div v-if="showMoreLanguages" id="language-more-list" class="language-more-list">
+              <MenuItem v-for="option in otherLanguages" :key="option.code" v-slot="{ close }">
+                <div
+                  class="language-item"
+                  :class="{ active: isActive(option.code) }"
+                  @click="() => handleLanguageClick(option.code, close)"
+                >
+                  <div class="language-item-main">
+                    <span class="language-label">{{ option.label }}</span>
+                  </div>
+                  <Check v-if="isActive(option.code)" :size="16" aria-hidden="true" />
+                </div>
+              </MenuItem>
+            </div>
+          </Transition>
+
+          <!-- 更多语言选项（固定在最底部） -->
           <div class="language-item-full-width">
-            <div class="language-item language-item-arrow" @click="toggleMoreLanguages">
+            <div
+              class="language-item language-item-arrow"
+              role="button"
+              tabindex="0"
+              :aria-expanded="showMoreLanguages"
+              aria-controls="language-more-list"
+              @click="toggleMoreLanguages"
+              @keydown.enter.prevent="toggleMoreLanguages"
+              @keydown.space.prevent="toggleMoreLanguages"
+            >
               <div class="language-item-main">
-                <ChevronDown v-if="!showMoreLanguages" :size="16" class="arrow-icon" />
-                <ChevronUp v-else :size="16" class="arrow-icon" />
+                <ChevronUp v-if="showMoreLanguages" :size="16" class="arrow-icon" />
+                <ChevronDown v-else :size="16" class="arrow-icon" />
               </div>
             </div>
           </div>
-
-          <!-- 其他语言（仅在展开时显示） -->
-          <template v-if="showMoreLanguages">
-            <MenuItem v-for="option in otherLanguages" :key="option.code" v-slot="{ close }">
-              <div class="language-item" @click="() => handleLanguageClick(option.code, close)">
-                <div class="language-item-main">
-                  <span class="language-label">{{ option.label }}</span>
-                </div>
-              </div>
-            </MenuItem>
-          </template>
         </MenuItems>
       </Menu>
 

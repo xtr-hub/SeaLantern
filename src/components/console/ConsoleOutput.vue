@@ -37,6 +37,20 @@ let resizeObserver: ResizeObserver | null = null;
 let scrollDisposable: { dispose: () => void } | null = null;
 let hasAnyLine = false;
 let terminalTextarea: HTMLTextAreaElement | null = null;
+let emptyStateRenderId = 0;
+
+function handleWheelScroll(event: WheelEvent) {
+  if (!terminal) return;
+  if (event.ctrlKey) return;
+
+  const deltaInLines =
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY : event.deltaY / 40;
+  const lines = deltaInLines > 0 ? Math.ceil(deltaInLines) : Math.floor(deltaInLines);
+  if (lines === 0) return;
+
+  terminal.scrollLines(lines);
+  event.preventDefault();
+}
 
 async function handleCopyShortcut(event: KeyboardEvent) {
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "c") return;
@@ -125,14 +139,18 @@ function fitTerminal() {
   fitAddon?.fit();
 }
 
-function renderEmptyState() {
+function renderEmptyState(renderId = emptyStateRenderId) {
   if (!terminal) return;
-  terminal.write(`\x1b[2m${i18n.t("console.waiting_for_output")}\x1b[0m`);
+  terminal.write("", () => {
+    if (!terminal || hasAnyLine || renderId !== emptyStateRenderId) return;
+    terminal.write(`\x1b[2m${i18n.t("console.waiting_for_output")}\x1b[0m`);
+  });
 }
 
 function appendLines(lines: string[]) {
   if (!terminal) return;
   if (lines.length === 0) return;
+  emptyStateRenderId += 1;
 
   let isFirstLineInBuffer = !hasAnyLine;
   if (!hasAnyLine) {
@@ -158,10 +176,12 @@ function appendLines(lines: string[]) {
 
 function clear() {
   if (!terminal) return;
+  emptyStateRenderId += 1;
+  const renderId = emptyStateRenderId;
   terminal.clear();
   terminal.reset();
   hasAnyLine = false;
-  renderEmptyState();
+  renderEmptyState(renderId);
   emit("scroll", false);
 }
 
@@ -171,7 +191,7 @@ function getAllPlainText(): string {
     excludeAltBuffer: true,
     excludeModes: true,
   });
-  return stripAnsi(serialized).replaceAll("\r", "");
+  return stripAnsi(serialized).replace(/\r/g, "");
 }
 
 function stripAnsi(text: string): string {
@@ -217,7 +237,7 @@ onMounted(() => {
 
   terminal = new Terminal({
     convertEol: true,
-    allowTransparency: false,
+    allowTransparency: true,
     disableStdin: true,
     cursorBlink: false,
     cursorInactiveStyle: "none",
@@ -230,7 +250,7 @@ onMounted(() => {
       width: 4,
     },
     theme: {
-      background: cssVar("--sl-bg-secondary", "#111827"),
+      background: "rgba(0, 0, 0, 0)",
       foreground: cssVar("--sl-text-primary", "#e5e7eb"),
       cursor: "transparent",
       cursorAccent: "transparent",
@@ -249,13 +269,14 @@ onMounted(() => {
   terminal.loadAddon(clipboardAddon);
   terminal.loadAddon(serializeAddon);
   terminal.open(terminalHost.value);
-  terminalTextarea = terminal.textarea;
+  terminalTextarea = terminal.textarea ?? null;
   if (terminalTextarea) {
     terminalTextarea.tabIndex = -1;
     terminalTextarea.readOnly = true;
     terminalTextarea.addEventListener("focus", keepDisplayOnlyFocus);
   }
   terminalHost.value.addEventListener("mousedown", keepDisplayOnlyFocus);
+  terminalHost.value.addEventListener("wheel", handleWheelScroll, { passive: false });
   fitTerminal();
   setupScrollTracking();
   clear();
@@ -276,6 +297,7 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleCopyShortcut);
   document.removeEventListener("copy", handleCopyEvent, true);
   terminalHost.value?.removeEventListener("mousedown", keepDisplayOnlyFocus);
+  terminalHost.value?.removeEventListener("wheel", handleWheelScroll);
   terminalTextarea?.removeEventListener("focus", keepDisplayOnlyFocus);
   terminalTextarea = null;
   resizeObserver?.disconnect();
@@ -363,24 +385,7 @@ defineExpose({ doScroll, appendLines, clear, getAllPlainText });
 }
 
 .terminal-host :deep(.xterm-viewport) {
-  overflow-y: auto !important;
-  background: var(--sl-bg-secondary);
-}
-
-.terminal-host :deep(.xterm .xterm-scrollable-element > .scrollbar) {
   background: transparent !important;
-}
-
-.terminal-host :deep(.xterm .xterm-scrollable-element > .scrollbar.vertical) {
-  width: 4px !important;
-}
-
-.terminal-host :deep(.xterm .xterm-scrollable-element > .scrollbar > .slider) {
-  border-radius: 999px;
-  border: none;
-  transition:
-    background-color 0.16s ease,
-    opacity 0.16s ease;
 }
 
 .scroll-btn {

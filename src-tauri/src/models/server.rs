@@ -153,3 +153,13 @@ pub struct StartupCandidateItem {
     pub path: String,
     pub recommended: u8,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidateServerPathResult {
+    pub valid: bool,
+    pub message: String,
+    #[serde(default)]
+    pub jar_path: Option<String>,
+    #[serde(default)]
+    pub startup_mode: Option<String>,
+}

@@ -62,6 +62,7 @@ COPY src-tauri/build.rs ./src-tauri/
 COPY src-tauri/src/ ./src-tauri/src/
 COPY src-tauri/icons/ ./src-tauri/icons/
 COPY src-tauri/tauri.conf.json ./src-tauri/
+COPY src-tauri/locales/ ./src-tauri/locales/
 COPY docker-entry/Cargo.toml ./docker-entry/
 COPY docker-entry/src/ ./docker-entry/src/
 
@@ -104,8 +105,12 @@ COPY src-tauri/build.rs ./src-tauri/
 COPY src-tauri/src/ ./src-tauri/src/
 COPY src-tauri/icons/ ./src-tauri/icons/
 COPY src-tauri/tauri.conf.json ./src-tauri/
+COPY src-tauri/locales/ ./src-tauri/locales/
 COPY docker-entry/Cargo.toml ./docker-entry/
 COPY docker-entry/src/ ./docker-entry/src/
+
+# 复制 tauri.conf.json 中 bundle.resources 引用的文件
+COPY LICENSE NOTICE ./
 
 # 构建 docker-entry 二进制
 RUN cargo build --release -p docker-entry

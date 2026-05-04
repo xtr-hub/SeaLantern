@@ -1,4 +1,5 @@
 import { computed, onActivated, onMounted, onUnmounted, ref, watch } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useRouter } from "vue-router";
 import { appendCustomCandidate } from "@components/views/create/createServerWorkflow";
 import type { StartupCandidate } from "@components/views/create/startupTypes";
@@ -31,9 +32,40 @@ function generateUUID(): string {
 
 type SourceType = "archive" | "folder" | "";
 
+function inferSourceType(path: string): SourceType {
+  const lowerPath = path.toLowerCase();
+  if (
+    lowerPath.endsWith(".zip") ||
+    lowerPath.endsWith(".tar") ||
+    lowerPath.endsWith(".tar.gz") ||
+    lowerPath.endsWith(".tgz") ||
+    lowerPath.endsWith(".jar")
+  ) {
+    return "archive";
+  }
+  return "folder";
+}
+
+function parseNumber(value: string, fallbackValue: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallbackValue : parsed;
+}
+
+export const CREATE_SERVER_SOURCE_DROP_EVENT = "create-server-source-drop";
+const CREATE_SERVER_DND_DEBUG = import.meta.env.DEV;
+
+function logCreateServerDnd(message: string, payload?: unknown) {
+  if (!CREATE_SERVER_DND_DEBUG) return;
+  if (payload === undefined) {
+    console.debug(message);
+    return;
+  }
+  console.debug(message, payload);
+}
+
 export function useCreateServerPage() {
   const router = useRouter();
-  const store = useServerStore();
+  const serverstore = useServerStore();
   const { error: errorMsg, showError, clearError } = useMessage();
   const { loading: javaLoading, start: startJavaLoading, stop: stopJavaLoading } = useLoading();
   const { loading: creating, start: startCreating, stop: stopCreating } = useLoading();
@@ -64,6 +96,7 @@ export function useCreateServerPage() {
 
   const AUTO_SCAN_DEBOUNCE_MS = 120;
   let startupDetectTimer: ReturnType<typeof setTimeout> | null = null;
+  let unlistenSourceDropEvent: UnlistenFn | null = null;
 
   const runPathOverwriteRisk = ref(false);
   const RUN_PATH_CONFLICT_DEBOUNCE_MS = 180;
@@ -103,14 +136,11 @@ export function useCreateServerPage() {
     if (selectedStartup.value.mode === "custom") {
       return customStartupCommand.value.trim().length > 0 && !customCommandHasRedirect.value;
     }
-    if (
+    return !(
       selectedStartup.value.mode === "starter" &&
       mcVersionDetectionFailed.value &&
       selectedMcVersion.value.trim().length === 0
-    ) {
-      return false;
-    }
-    return true;
+    );
   });
 
   const hasJava = computed(() => selectedJava.value.trim().length > 0);
@@ -183,6 +213,27 @@ export function useCreateServerPage() {
 
   onMounted(async () => {
     await loadDefaultSettings();
+
+    if (!isBrowserEnv()) {
+      try {
+        unlistenSourceDropEvent = await listen<string[]>(
+          CREATE_SERVER_SOURCE_DROP_EVENT,
+          (event) => {
+            const droppedPaths = Array.isArray(event.payload) ? event.payload : [];
+            logCreateServerDnd("[useCreateServerPage] Received source drop event", droppedPaths);
+            if (droppedPaths.length === 0) {
+              return;
+            }
+
+            const path = droppedPaths[0];
+            sourcePath.value = path;
+            sourceType.value = inferSourceType(path);
+          },
+        );
+      } catch (error) {
+        logCreateServerDnd("[useCreateServerPage] Failed to register source drop listener", error);
+      }
+    }
   });
 
   onUnmounted(() => {
@@ -193,6 +244,10 @@ export function useCreateServerPage() {
     if (runPathConflictTimer) {
       clearTimeout(runPathConflictTimer);
       runPathConflictTimer = null;
+    }
+    if (unlistenSourceDropEvent) {
+      unlistenSourceDropEvent();
+      unlistenSourceDropEvent = null;
     }
   });
 
@@ -276,11 +331,6 @@ export function useCreateServerPage() {
     { immediate: true },
   );
 
-  function parseNumber(value: string, fallbackValue: number): number {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackValue;
-  }
-
   async function loadDefaultSettings() {
     try {
       const settings = await settingsApi.get();
@@ -309,8 +359,7 @@ export function useCreateServerPage() {
         } else {
           // 如果没有上次的路径，获取默认路径
           try {
-            const defaultPath = await systemApi.getDefaultRunPath();
-            runPath.value = defaultPath;
+            runPath.value = await systemApi.getDefaultRunPath();
           } catch (error) {
             console.error("Failed to get default run path:", error);
           }
@@ -334,8 +383,8 @@ export function useCreateServerPage() {
   }
 
   function loadFromDraft() {
-    let store = useCreateServerDraftStore();
-    let draft = store.consumeDraft();
+    const draftStore = useCreateServerDraftStore();
+    const draft = draftStore.consumeDraft();
     if (draft !== null) {
       sourcePath.value = draft.sourcePath;
       sourceType.value = draft.sourceType;
@@ -587,12 +636,36 @@ export function useCreateServerPage() {
         mcVersion: resolvedMcVersion || undefined,
       });
 
-      await store.refreshList();
+      await serverstore.refreshList();
       router.push("/");
     } catch (error) {
       showError(String(error));
     } finally {
       stopCreating();
+    }
+  }
+
+  /**
+   * 处理 Tauri 文件拖放事件
+   * 根据文件扩展名自动识别为压缩包或文件夹
+   */
+  function handleTauriDrop(paths: string[]) {
+    if (paths.length === 0) return;
+
+    const archiveExtensions = [".zip", ".tar", ".tar.gz", ".tgz", ".jar"];
+
+    function hasArchiveExtension(path: string): boolean {
+      const lowerPath = path.toLowerCase();
+      return archiveExtensions.some((ext) => lowerPath.endsWith(ext));
+    }
+
+    const firstPath = paths[0];
+    if (hasArchiveExtension(firstPath)) {
+      sourcePath.value = firstPath;
+      sourceType.value = "archive";
+    } else {
+      sourcePath.value = firstPath;
+      sourceType.value = "folder";
     }
   }
 
@@ -637,5 +710,6 @@ export function useCreateServerPage() {
     rescanStartupCandidates,
     detectJava,
     handleSubmit,
+    handleTauriDrop,
   };
 }

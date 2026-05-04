@@ -17,8 +17,17 @@ bun.lock
 nul
 changelogs/
 .claude/
+.codex
 .trae/
 changelog/
 .review/
 plugin-market/
 plugins-demo/
+
+# About OpenCode
+.opencode/
+.playwright-mcp/
+
+#docker test
+data/
+CLAUDE.md
